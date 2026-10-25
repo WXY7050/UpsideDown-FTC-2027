@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.upsidedown.hardware;
 
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.DigitalChannel;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -31,11 +32,8 @@ public class RobotHardware {
     public Servo ledL;
     public Servo ledR;
 
-    // 伺服位置常量
-    public static final double BLOCK_CLOSE = 0.5;
-    public static final double BLOCK_OPEN = 0.75;
-    public static final double INTAKE_UP = 0.6;
-    public static final double INTAKE_DOWN = 0.5;
+    // Flower 舵机
+    public Servo flower;
 
     private HardwareMap hwMap;
 
@@ -79,19 +77,16 @@ public class RobotHardware {
         // 初始化LED灯
         ledL = hwMap.get(Servo.class, "ledL");
         ledR = hwMap.get(Servo.class, "ledR");
+
+        // 初始化 Flower 舵机
+        flower = hwMap.get(Servo.class, "flower");
     }
 
-    public void updateOdo() {
-        odo.update();
-    }
+    public void updateOdo() { odo.update(); }
 
-    public void resetHeading() {
-        odo.resetPosAndIMU();
-    }
+    public void resetHeading() { odo.resetPosAndIMU(); }
 
-    public double getHeading() {
-        return odo.getHeading(AngleUnit.RADIANS);
-    }
+    public double getHeading() { return odo.getHeading(AngleUnit.RADIANS); }
 
     // shooter1是goBILDA 5203/5204系列无减速箱裸轴电机：编码器分辨率固定28 ticks/转（电机轴=输出轴，减速比1:1）。
     // DS配置界面里选的电机型号对应的ticksPerRev/maxRPM和实际减速比不一致，因此这里直接硬编码真实值，不依赖getMotorType()。
@@ -105,7 +100,5 @@ public class RobotHardware {
     }
 
     // shooter1满功率(power=1.0)时理论能达到的转速，用于PID前馈项
-    public double getShooterMaxRPM() {
-        return SHOOTER_MAX_RPM;
-    }
+    public double getShooterMaxRPM() { return SHOOTER_MAX_RPM; }
 }

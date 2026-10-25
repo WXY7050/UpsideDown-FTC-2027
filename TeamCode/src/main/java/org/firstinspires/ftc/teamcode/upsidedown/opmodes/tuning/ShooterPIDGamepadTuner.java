@@ -7,7 +7,11 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 
+import org.firstinspires.ftc.teamcode.upsidedown.RobotConstants;
 import org.firstinspires.ftc.teamcode.upsidedown.hardware.RobotHardware;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.ShooterSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.FlowerSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.LEDSubsystem;
 
 
 @TeleOp(
@@ -25,35 +29,41 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
     private VoltageSensor voltageSensor;
 
+    private ShooterSubsystem shooter;
+
+    private FlowerSubsystem flower;
+
+    private LEDSubsystem led;
+
 
     // =========================================================
-    // 默认参数
+    // 默认参数（从 Constants 加载）
     // =========================================================
 
     private static final double DEFAULT_TARGET_RPM =
-            3725;
+            RobotConstants.SHOOTER_TARGET_RPM;
 
     private static final double DEFAULT_RPM_TOLERANCE =
-            35;
+            RobotConstants.SHOOTER_RPM_TOLERANCE;
 
     private static final double DEFAULT_KF =
-            0.00017020;
+            RobotConstants.SHOOTER_KF;
 
     private static final double DEFAULT_KP =
-            0.000446;
+            RobotConstants.SHOOTER_KP;
 
     private static final double DEFAULT_KI =
-            0.0;
+            RobotConstants.SHOOTER_KI;
 
     private static final double DEFAULT_KD =
-            0.000001;
+            RobotConstants.SHOOTER_KD;
 
     private static final double DEFAULT_FEED_POWER =
-            1.0;
+            RobotConstants.FEED_POWER;
 
 
     // =========================================================
-    // 可调参数
+    // 可调参数（运行时可调整，会同步到 ShooterSubsystem）
     // =========================================================
 
     public static double TARGET_RPM =
@@ -80,7 +90,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
     // =========================================================
 
     /*
-     * 只控制“发射时”的 Intake Feed 速度。
+     * 只控制”发射时”的 Intake Feed 速度。
      *
      * 左 Trigger 正常吸球仍然使用 1.0。
      *
@@ -101,15 +111,14 @@ public class ShooterPIDGamepadTuner extends OpMode {
     // =========================================================
 
     public static double NOMINAL_VOLTAGE =
-            12.8;
+            RobotConstants.NOMINAL_VOLTAGE;
 
 
     // =========================================================
-    // Integral Anti-Windup
+    // Integral Anti-Windup（不暴露调参，使用 Constants 默认值）
     // =========================================================
 
-    public static double MAX_INTEGRAL_OUTPUT =
-            0.20;
+    // MAX_INTEGRAL_OUTPUT 已在 ShooterSubsystem 中管理
 
 
     // =========================================================
@@ -121,20 +130,6 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
     private static final double MAX_TARGET_RPM =
             7000;
-
-
-    // =========================================================
-    // PID 内部变量
-    // =========================================================
-
-    private double integral =
-            0;
-
-    private double lastError =
-            0;
-
-    private long lastTime =
-            0;
 
 
     // =========================================================
@@ -247,24 +242,39 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
 
         // =====================================================
+        // Shooter 子系统
+        // =====================================================
+
+        shooter = new ShooterSubsystem(robot, voltageSensor);
+
+
+        // =====================================================
+        // Flower 子系统
+        // =====================================================
+
+        flower = new FlowerSubsystem(robot);
+
+
+        // =====================================================
+        // LED 子系统
+        // =====================================================
+
+        led = new LEDSubsystem(robot);
+
+
+        // =====================================================
         // Motors / Servo 初始状态
         // =====================================================
 
-        robot.shooter1.setPower(
-                0
-        );
-
-        robot.shooter2.setPower(
-                0
-        );
+        shooter.stop();
 
         robot.intake.setPower(
                 0
         );
 
-        robot.block.setPosition(
-                RobotHardware.BLOCK_CLOSE
-        );
+        shooter.closeBlock();
+
+        led.showDefault();
 
 
         telemetry.addLine(
@@ -338,7 +348,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
     @Override
     public void start() {
 
-        resetPID();
+        shooter.resetPID();
 
         shooterEnabled =
                 false;
@@ -368,7 +378,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
             shooterEnabled =
                     !shooterEnabled;
 
-            resetPID();
+            shooter.resetPID();
 
             feedUnlocked =
                     false;
@@ -512,7 +522,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
                         && !lastRightBumper
         ) {
 
-            resetPID();
+            shooter.resetPID();
 
             feedUnlocked =
                     false;
@@ -524,207 +534,24 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
 
         // =====================================================
-        // 当前电池电压
+        // 同步参数到 ShooterSubsystem
         // =====================================================
 
-        double batteryVoltage =
-                voltageSensor.getVoltage();
-
-
-        if (
-                batteryVoltage < 1.0
-        ) {
-
-            batteryVoltage =
-                    NOMINAL_VOLTAGE;
-        }
+        shooter.setTargetRPM(TARGET_RPM);
+        shooter.setRpmTolerance(RPM_TOLERANCE);
+        shooter.setkF(kF);
+        shooter.setkP(kP);
+        shooter.setkI(kI);
+        shooter.setkD(kD);
+        shooter.setNominalVoltage(NOMINAL_VOLTAGE);
 
 
         // =====================================================
-        // 当前 RPM
+        // Shooter 更新
         // =====================================================
 
-        double currentRPM =
-                robot.getShooterRPM();
-
-
-        double error =
-                TARGET_RPM
-                        - currentRPM;
-
-
-        // =====================================================
-        // PID Timing
-        // =====================================================
-
-        long currentTime =
-                System.nanoTime();
-
-
-        double dt =
-                (
-                        currentTime
-                                - lastTime
-                )
-                        / 1_000_000_000.0;
-
-
-        lastTime =
-                currentTime;
-
-
-        if (
-                dt <= 0
-                        || dt > 0.2
-        ) {
-
-            dt =
-                    0.02;
-        }
-
-
-        // =====================================================
-        // Integral
-        // =====================================================
-
-        integral +=
-                error * dt;
-
-
-        if (
-                kI != 0
-        ) {
-
-            double maxIntegral =
-                    MAX_INTEGRAL_OUTPUT
-                            / Math.abs(
-                            kI
-                    );
-
-
-            integral =
-                    Math.max(
-                            -maxIntegral,
-                            Math.min(
-                                    maxIntegral,
-                                    integral
-                            )
-                    );
-
-        } else {
-
-            integral =
-                    0;
-        }
-
-
-        // =====================================================
-        // Derivative
-        // =====================================================
-
-        double derivative =
-                (
-                        error
-                                - lastError
-                )
-                        / dt;
-
-
-        lastError =
-                error;
-
-
-        // =====================================================
-        // PIDF Output
-        // =====================================================
-
-        double fOutput =
-                kF
-                        * TARGET_RPM;
-
-
-        double pOutput =
-                kP
-                        * error;
-
-
-        double iOutput =
-                kI
-                        * integral;
-
-
-        double dOutput =
-                kD
-                        * derivative;
-
-
-        // =====================================================
-        // Raw Power
-        // =====================================================
-
-        double rawPower =
-                fOutput
-                        + pOutput
-                        + iOutput
-                        + dOutput;
-
-
-        // =====================================================
-        // Voltage Compensation
-        // =====================================================
-
-        double voltageCompensation =
-                NOMINAL_VOLTAGE
-                        / batteryVoltage;
-
-
-        // =====================================================
-        // Final Shooter Power
-        // =====================================================
-
-        double shooterPower =
-                rawPower
-                        * voltageCompensation;
-
-
-        shooterPower =
-                Math.max(
-                        0,
-                        Math.min(
-                                1,
-                                shooterPower
-                        )
-                );
-
-
-        // =====================================================
-        // Shooter Output
-        // =====================================================
-
-        if (
-                shooterEnabled
-        ) {
-
-            robot.shooter1.setPower(
-                    shooterPower
-            );
-
-            robot.shooter2.setPower(
-                    shooterPower
-            );
-
-        } else {
-
-            robot.shooter1.setPower(
-                    0
-            );
-
-            robot.shooter2.setPower(
-                    0
-            );
-
-            feedUnlocked =
-                    false;
+        if (shooterEnabled) {
+            shooter.update();
         }
 
 
@@ -734,10 +561,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
         boolean shooterReady =
                 shooterEnabled
-                        && Math.abs(
-                        error
-                )
-                        <= RPM_TOLERANCE;
+                        && shooter.isReady();
 
 
         // =====================================================
@@ -757,9 +581,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
                     -1.0
             );
 
-            robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
-            );
+            shooter.closeBlock();
 
             feedUnlocked =
                     false;
@@ -802,9 +624,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
                     feedUnlocked
             ) {
 
-                robot.block.setPosition(
-                        RobotHardware.BLOCK_OPEN
-                );
+                shooter.openBlock();
 
 
                 robot.intake.setPower(
@@ -813,9 +633,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
             } else {
 
-                robot.block.setPosition(
-                        RobotHardware.BLOCK_CLOSE
-                );
+                shooter.closeBlock();
 
 
                 robot.intake.setPower(
@@ -836,9 +654,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
                     false;
 
 
-            robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
-            );
+            shooter.closeBlock();
 
 
             /*
@@ -860,9 +676,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
                     false;
 
 
-            robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
-            );
+            shooter.closeBlock();
 
 
             robot.intake.setPower(
@@ -1024,7 +838,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
         telemetry.addData(
                 "Battery Voltage",
                 "%.2f V",
-                batteryVoltage
+                shooter.getBatteryVoltage()
         );
 
 
@@ -1038,7 +852,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
         telemetry.addData(
                 "Voltage Comp",
                 "%.4f",
-                voltageCompensation
+                NOMINAL_VOLTAGE / shooter.getBatteryVoltage()
         );
 
 
@@ -1066,28 +880,28 @@ public class ShooterPIDGamepadTuner extends OpMode {
         telemetry.addData(
                 "Actual RPM",
                 "%.1f",
-                currentRPM
+                shooter.getCurrentRPM()
         );
 
 
         telemetry.addData(
                 "Error",
                 "%.1f",
-                error
+                shooter.getError()
         );
 
 
         telemetry.addData(
                 "Raw Power",
                 "%.4f",
-                rawPower
+                shooter.getfOutput() + shooter.getpOutput() + shooter.getiOutput() + shooter.getdOutput()
         );
 
 
         telemetry.addData(
                 "Final Power",
                 "%.4f",
-                shooterPower
+                shooter.getCurrentPower()
         );
 
 
@@ -1108,28 +922,28 @@ public class ShooterPIDGamepadTuner extends OpMode {
         telemetry.addData(
                 "F",
                 "%.4f",
-                fOutput
+                shooter.getfOutput()
         );
 
 
         telemetry.addData(
                 "P",
                 "%.4f",
-                pOutput
+                shooter.getpOutput()
         );
 
 
         telemetry.addData(
                 "I",
                 "%.4f",
-                iOutput
+                shooter.getiOutput()
         );
 
 
         telemetry.addData(
                 "D",
                 "%.4f",
-                dOutput
+                shooter.getdOutput()
         );
 
 
@@ -1184,13 +998,13 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
         packet.put(
                 "ActualRPM",
-                currentRPM
+                shooter.getCurrentRPM()
         );
 
 
         packet.put(
                 "Error",
-                error
+                shooter.getError()
         );
 
 
@@ -1198,7 +1012,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
         packet.put(
                 "BatteryVoltage",
-                batteryVoltage
+                shooter.getBatteryVoltage()
         );
 
 
@@ -1210,7 +1024,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
         packet.put(
                 "VoltageComp",
-                voltageCompensation
+                NOMINAL_VOLTAGE / shooter.getBatteryVoltage()
         );
 
 
@@ -1218,14 +1032,14 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
         packet.put(
                 "RawPower",
-                rawPower
+                shooter.getfOutput() + shooter.getpOutput() + shooter.getiOutput() + shooter.getdOutput()
         );
 
 
         packet.put(
                 "Power",
                 shooterEnabled
-                        ? shooterPower
+                        ? shooter.getCurrentPower()
                         : 0
         );
 
@@ -1250,25 +1064,25 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
         packet.put(
                 "F_Output",
-                fOutput
+                shooter.getfOutput()
         );
 
 
         packet.put(
                 "P_Output",
-                pOutput
+                shooter.getpOutput()
         );
 
 
         packet.put(
                 "I_Output",
-                iOutput
+                shooter.getiOutput()
         );
 
 
         packet.put(
                 "D_Output",
-                dOutput
+                shooter.getdOutput()
         );
 
 
@@ -1373,7 +1187,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
                         );
 
 
-                resetPID();
+                shooter.resetPID();
 
                 feedUnlocked =
                         false;
@@ -1443,7 +1257,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
                         );
 
 
-                resetPID();
+                shooter.resetPID();
 
                 break;
 
@@ -1822,7 +1636,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
 
 
         NOMINAL_VOLTAGE =
-                12.8;
+                RobotConstants.NOMINAL_VOLTAGE;
 
 
         stepMultiplier =
@@ -1833,26 +1647,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
                 false;
 
 
-        resetPID();
-    }
-
-
-    // =========================================================
-    // Reset PID
-    // =========================================================
-
-    private void resetPID() {
-
-        integral =
-                0;
-
-
-        lastError =
-                0;
-
-
-        lastTime =
-                System.nanoTime();
+        shooter.resetPID();
     }
 
 
@@ -1863,14 +1658,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
     @Override
     public void stop() {
 
-        robot.shooter1.setPower(
-                0
-        );
-
-
-        robot.shooter2.setPower(
-                0
-        );
+        shooter.stop();
 
 
         robot.intake.setPower(
@@ -1878,9 +1666,7 @@ public class ShooterPIDGamepadTuner extends OpMode {
         );
 
 
-        robot.block.setPosition(
-                RobotHardware.BLOCK_CLOSE
-        );
+        shooter.closeBlock();
 
 
         shooterEnabled =

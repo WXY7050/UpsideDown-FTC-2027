@@ -6,14 +6,18 @@ import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.math.Pose;
 
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 import org.firstinspires.ftc.teamcode.upsidedown.hardware.RobotHardware;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.ShooterSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.FlowerSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.LEDSubsystem;
 
-
+@Disabled
 @TeleOp(name = "新测试Hive Shooting Zone Test", group = "Test")
 public class HiveShootingZoneTestNEW extends OpMode {
 
@@ -199,7 +203,7 @@ public class HiveShootingZoneTestNEW extends OpMode {
         robot.intake.setPower(0.0);
 
         robot.block.setPosition(
-                RobotHardware.BLOCK_CLOSE
+                org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE
         );
     }
 
@@ -635,7 +639,7 @@ public class HiveShootingZoneTestNEW extends OpMode {
             );
 
             robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
+                    org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE
             );
 
             feedUnlocked =
@@ -671,7 +675,7 @@ public class HiveShootingZoneTestNEW extends OpMode {
             ) {
 
                 robot.block.setPosition(
-                        RobotHardware.BLOCK_OPEN
+                        org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_OPEN
                 );
 
                 robot.intake.setPower(
@@ -681,7 +685,7 @@ public class HiveShootingZoneTestNEW extends OpMode {
             } else {
 
                 robot.block.setPosition(
-                        RobotHardware.BLOCK_CLOSE
+                        org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE
                 );
 
                 robot.intake.setPower(
@@ -703,7 +707,7 @@ public class HiveShootingZoneTestNEW extends OpMode {
                     false;
 
             robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
+                    org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE
             );
 
             robot.intake.setPower(
@@ -725,7 +729,7 @@ public class HiveShootingZoneTestNEW extends OpMode {
             );
 
             robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
+                    org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE
             );
         }
 
@@ -1148,7 +1152,7 @@ public class HiveShootingZoneTestNEW extends OpMode {
         );
 
         robot.block.setPosition(
-                RobotHardware.BLOCK_CLOSE
+                org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE
         );
 
         feedUnlocked =

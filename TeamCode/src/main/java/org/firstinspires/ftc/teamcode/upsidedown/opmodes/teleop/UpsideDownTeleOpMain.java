@@ -1,715 +1,610 @@
 package org.firstinspires.ftc.teamcode.upsidedown.opmodes.teleop;
 
 import com.acmerobotics.dashboard.FtcDashboard;
+import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 
 import com.pedropathing.follower.Follower;
+import com.pedropathing.math.Pose;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 import org.firstinspires.ftc.teamcode.pedro.Constants;
+import org.firstinspires.ftc.teamcode.upsidedown.RobotConstants;
 import org.firstinspires.ftc.teamcode.upsidedown.hardware.RobotHardware;
 import org.firstinspires.ftc.teamcode.upsidedown.subsystems.DriveSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.FlowerSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.IntakeSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.LEDSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.ShooterSubsystem;
 
 
+@Config
 @TeleOp(name = "UpsideDown 手动", group = "UpsideDown")
 public class UpsideDownTeleOpMain extends OpMode {
 
-    private Follower follower;
-    private DriveSubsystem drive;
+    // =========================================================
+    // Hardware / Pedro / Subsystems
+    // =========================================================
+
     private RobotHardware robot;
+    private Follower follower;
+
+    private DriveSubsystem drive;
+    private ShooterSubsystem shooter;
+    private IntakeSubsystem intake;
+    private FlowerSubsystem flower;
+    private LEDSubsystem led;
 
     private VoltageSensor voltageSensor;
 
 
     // =========================================================
-    // 底盘
+    // 临时 TeleOp 起始 Pose
+    //
+    // 后续我们会做 Auto -> TeleOp Pose 无缝衔接，
+    // 到时这里不再作为比赛时最终 Pose 来源。
+    // =========================================================
+
+    public static double START_X = 12.441 / 2.0;
+    public static double START_Y = 12.835 / 2.0;
+    public static double START_HEADING_DEG = 90.0;
+
+
+    // =========================================================
+    // Alliance
+    //
+    // true  = RED
+    // false = BLUE
+    // =========================================================
+
+    public static boolean RED_ALLIANCE = true;
+
+
+    // =========================================================
+    // 全场 HIVE 坐标
+    //
+    // RED：左列
+    // BLUE：右列
+    //
+    // 下排开口 270°
+    // 上排开口 90°
+    // =========================================================
+
+    public static double RED_LOWER_X = 57.0;
+    public static double RED_LOWER_Y = 55.0;
+    public static double RED_LOWER_OPEN_HEADING = 270.0;
+
+    public static double RED_UPPER_X = 57.0;
+    public static double RED_UPPER_Y = 86.5;
+    public static double RED_UPPER_OPEN_HEADING = 90.0;
+
+    public static double BLUE_LOWER_X = 82.5;
+    public static double BLUE_LOWER_Y = 55.0;
+    public static double BLUE_LOWER_OPEN_HEADING = 270.0;
+
+    public static double BLUE_UPPER_X = 82.5;
+    public static double BLUE_UPPER_Y = 86.5;
+    public static double BLUE_UPPER_OPEN_HEADING = 90.0;
+
+
+    // =========================================================
+    // Auto Aim Model 范围
+    // =========================================================
+
+    public static double MODEL_MIN_DISTANCE = 20.0;
+    public static double MODEL_MAX_DISTANCE = 90.0;
+
+    public static double MODEL_MIN_SECTOR = -50.0;
+    public static double MODEL_MAX_SECTOR = 40.0;
+
+
+    // =========================================================
+    // Auto Aim Heading 控制
+    // =========================================================
+
+    public static double HEADING_TOLERANCE_DEG = 1.5;
+
+    public static double AIM_KP = 0.018;
+    public static double AIM_MAX_POWER = 0.55;
+    public static double AIM_MIN_POWER = 0.07;
+
+
+    // =========================================================
+    // Shooter Auto Aim Model
+    //
+    // Shooter PIDF / Tolerance 等底层参数统一由
+    // RobotConstants + ShooterSubsystem 管理。
+    // =========================================================
+
+    public static double DEFAULT_TARGET_RPM = 3750.0;
+
+    // 距离修正：
+    // targetRPM =
+    // sectorBaseRPM + (distance - RPM_DISTANCE_BASE) * RPM_PER_INCH
+    public static double RPM_DISTANCE_BASE = 48.0;
+    public static double RPM_PER_INCH = 7.0;
+
+
+    // =========================================================
+    // Driver Control State
     // =========================================================
 
     private boolean fieldCentric = true;
     private boolean lastFieldCentricButton = false;
 
-
-    // =========================================================
-    // Shooter 参数
-    // =========================================================
-
-    // 目标转速
-    public static double TARGET_RPM = 3775;
-
-    // 第一球允许发射的 RPM 误差
-    public static double RPM_TOLERANCE = 35;
-
-    // 发射时 Feed 速度
-    public static final double FEED_POWER = 0.45;
-
-
-    // =========================================================
-    // Shooter PIDF
-    // =========================================================
-
     /*
-     * Shooter 控制公式：
+     * false:
+     * 本次 RT 还没有同时满足
+     * Model Valid + Heading Ready + Shooter Ready
      *
-     * rawPower =
-     *      kF * TARGET_RPM
-     *      + kP * error
-     *      + kI * integral
-     *      + kD * derivative
-     *
-     * finalPower =
-     *      rawPower
-     *      * NOMINAL_VOLTAGE
-     *      / batteryVoltage
+     * true:
+     * 已经解锁。
+     * 只要 RT 继续按住，持续 Feed，
+     * 不再因为 RPM 暂时下降而停顿。
      */
-
-
-    // Feed Forward
-    public static double kF = 0.00017020;
-
-
-    // PID
-    public static double kP = 0.000446;
-
-    public static double kI = 0.0;
-
-    public static double kD = 0.000001;
-
-
-    // I 项最大允许贡献的 motor power
-    public static double MAX_INTEGRAL_OUTPUT = 0.20;
-
-
-    // =========================================================
-    // 电压补偿
-    // =========================================================
-
-    /*
-     * 当前标准电压
-     */
-
-    public static final double NOMINAL_VOLTAGE = 12.9;
-
-
-    // =========================================================
-    // 满球 / LED 参数
-    // =========================================================
-
-    public static double BALL_DETECT_DISTANCE = 50.0;
-
-    public static double LED_DEEP_BLUE = 0.615;
-
-
-    // =========================================================
-    // PID 内部变量
-    // =========================================================
-
-    private double integral = 0.0;
-
-    private double lastError = 0.0;
-
-    private long lastTime = 0;
-
-
-    // =========================================================
-    // Feed 状态
-    // =========================================================
-
-    /*
-     * false：
-     * 当前这一轮发射还没有达到过目标 RPM
-     *
-     * true：
-     * 已经达到过一次目标 RPM
-     * 本次右扳机一直按住期间
-     * 持续 Feed，不再检测 RPM
-     */
-
     private boolean feedUnlocked = false;
 
 
     // =========================================================
-    // Init
+    // INIT
     // =========================================================
 
     @Override
     public void init() {
+        // Hardware
+        robot = new RobotHardware();
+        robot.init(hardwareMap);
+        voltageSensor = hardwareMap.voltageSensor.iterator().next();
 
-        // Pedro Pathing
+        // Pedro
         follower = Constants.create(hardwareMap);
 
-
-        // 底盘
+        // Subsystems
         drive = new DriveSubsystem(hardwareMap);
+        shooter = new ShooterSubsystem(robot, voltageSensor);
+        intake = new IntakeSubsystem(robot);
+        flower = new FlowerSubsystem(robot);
+        led = new LEDSubsystem(robot);
 
+        // Shooter 参数
+        shooter.setRpmTolerance(RobotConstants.SHOOTER_RPM_TOLERANCE);
+        shooter.setTargetRPM(DEFAULT_TARGET_RPM);
 
-        // Robot Hardware
-        robot = new RobotHardware();
+        // 初始机构状态
+        shooter.closeBlock();
+        intake.stop();
+        flower.down();
+        led.showDefault();
 
-        robot.init(hardwareMap);
-
-
-        // =====================================================
-        // 电池电压传感器
-        // =====================================================
-
-        voltageSensor =
-                hardwareMap.voltageSensor
-                        .iterator()
-                        .next();
-
-
-        // 默认关闭 block
-        robot.block.setPosition(
-                RobotHardware.BLOCK_CLOSE
-        );
-
-
-        // 默认 LED
-        robot.ledL.setPosition(
-                0.48
-        );
-
-        robot.ledR.setPosition(
-                0.48
-        );
-
-
-        telemetry.addData(
-                "状态",
-                "初始化完成"
-        );
-
-        telemetry.addData(
-                "",
-                "按下 Start 开始"
-        );
-
+        telemetry.addData("状态", "UpsideDown 模块化 TeleOp 初始化完成");
+        telemetry.addData("Alliance", RED_ALLIANCE ? "RED" : "BLUE");
+        telemetry.addData("RPM Tolerance", "%.0f", RobotConstants.SHOOTER_RPM_TOLERANCE);
+        telemetry.addData("Feed Power", "%.2f", RobotConstants.FEED_POWER);
+        telemetry.addLine("");
+        telemetry.addLine("RB = Auto Aim");
+        telemetry.addLine("RT = Auto Aim + Fire");
         telemetry.update();
     }
 
 
     // =========================================================
-    // Start
+    // START
     // =========================================================
 
     @Override
     public void start() {
-
-        resetPID();
-
         feedUnlocked = false;
+        shooter.resetPID();
+        Pose startPose = new Pose(START_X, START_Y, Math.toRadians(START_HEADING_DEG));
+        follower.setPose(startPose);
     }
 
 
     // =========================================================
-    // Loop
+    // LOOP
     // =========================================================
 
     @Override
     public void loop() {
 
-
-        // =========================================================
-        // Odometry
-        // =========================================================
-
-        robot.updateOdo();
-
-        // follower.update();
-
-
-        // =========================================================
-        // 满球检测
-        // =========================================================
-
-        boolean ballAtF =
-                robot.disF.getState();
-
-        boolean ballAtM =
-                robot.disM.getState();
-
-        boolean ballAtB =
-                robot.disB.getState();
+        // =====================================================
+        // Pedro Localization
+        // =====================================================
+        follower.update();
+        Pose robotPose = follower.pose();
+        double robotX = robotPose.x();
+        double robotY = robotPose.y();
+        double robotHeadingRad = robotPose.heading();
+        double robotHeadingDeg = normalize360(Math.toDegrees(robotHeadingRad));
 
 
-        boolean ballsFull =
-                ballAtF
-                        && ballAtM
-                        && ballAtB;
+        // =====================================================
+        // 选择当前目标 HIVE
+        // =====================================================
+
+        HiveTarget lowerHive;
+        HiveTarget upperHive;
+
+        if (RED_ALLIANCE) {
+
+            lowerHive =
+                    evaluateHive(
+                            "RED LOWER",
+                            RED_LOWER_X,
+                            RED_LOWER_Y,
+                            RED_LOWER_OPEN_HEADING,
+                            robotX,
+                            robotY
+                    );
+
+            upperHive =
+                    evaluateHive(
+                            "RED UPPER",
+                            RED_UPPER_X,
+                            RED_UPPER_Y,
+                            RED_UPPER_OPEN_HEADING,
+                            robotX,
+                            robotY
+                    );
+
+        } else {
+
+            lowerHive =
+                    evaluateHive(
+                            "BLUE LOWER",
+                            BLUE_LOWER_X,
+                            BLUE_LOWER_Y,
+                            BLUE_LOWER_OPEN_HEADING,
+                            robotX,
+                            robotY
+                    );
+
+            upperHive =
+                    evaluateHive(
+                            "BLUE UPPER",
+                            BLUE_UPPER_X,
+                            BLUE_UPPER_Y,
+                            BLUE_UPPER_OPEN_HEADING,
+                            robotX,
+                            robotY
+                    );
+        }
 
 
-        // =========================================================
+        HiveTarget targetHive = selectBestHive(lowerHive, upperHive);
+
+        double targetHiveX = targetHive.x;
+        double targetHiveY = targetHive.y;
+        double targetOpenHeadingDeg = targetHive.openHeadingDeg;
+        double distanceToHive = targetHive.distance;
+        double sectorError = targetHive.sectorError;
+
+        boolean distanceValid = distanceToHive >= MODEL_MIN_DISTANCE && distanceToHive <= MODEL_MAX_DISTANCE;
+        boolean sectorValid = sectorError >= MODEL_MIN_SECTOR && sectorError <= MODEL_MAX_SECTOR;
+        boolean modelValid = distanceValid && sectorValid;
+
+        // =====================================================
+        // Auto Aim Heading
+        // =====================================================
+        double recommendedHeadingDeg = getRecommendedHeadingDeg(robotX, robotY, targetHiveX, targetHiveY, sectorError);
+        double headingErrorDeg = normalize180(recommendedHeadingDeg - robotHeadingDeg);
+        boolean headingReady = Math.abs(headingErrorDeg) <= HEADING_TOLERANCE_DEG;
+
+        // =====================================================
+        // Auto Aim RPM Model
+        // =====================================================
+        double sectorBaseRPM = getSectorBaseRPM(sectorError);
+        double distanceRPMCorrection = getDistanceRPMCorrection(distanceToHive);
+        double recommendedRPM = getRecommendedRPM(distanceToHive, sectorError);
+        double targetRPM = modelValid ? recommendedRPM : DEFAULT_TARGET_RPM;
+        shooter.setTargetRPM(targetRPM);
+
+        // =====================================================
+        // 三传感器满球检测
+        // =====================================================
+        boolean ballAtF = robot.disF.getState();
+        boolean ballAtM = robot.disM.getState();
+        boolean ballAtB = robot.disB.getState();
+        boolean ballsFull = ballAtF && ballAtM && ballAtB;
+
+        // =====================================================
         // LED
-        // =========================================================
+        // =====================================================
+        led.setByBallStatus(ballsFull);
 
-        if (ballsFull) {
 
-            robot.ledL.setPosition(
-                    LED_DEEP_BLUE
-            );
+        // =====================================================
+        // Driver Inputs
+        // =====================================================
+        boolean fireRequested = gamepad1.right_trigger > 0.1;
+        boolean autoAimRequested = gamepad1.right_bumper || fireRequested;
 
-            robot.ledR.setPosition(
-                    LED_DEEP_BLUE
-            );
+        double stickForward = -gamepad1.left_stick_y;
+        double stickRight = gamepad1.left_stick_x;
+        double rotate = gamepad1.right_stick_x;
 
-        } else {
+        // Back: Field Centric / Robot Centric
+        if (gamepad1.back && !lastFieldCentricButton) {
+            fieldCentric = !fieldCentric;
+        }
+        lastFieldCentricButton = gamepad1.back;
 
-            robot.ledL.setPosition(
-                    0.00
-            );
 
-            robot.ledR.setPosition(
-                    0.00
-            );
+        // =====================================================
+        // Auto Aim Rotation
+        // =====================================================
+        if (autoAimRequested) {
+            if (headingReady) {
+                rotate = 0.0;
+            } else {
+                double aimPower = AIM_KP * Math.abs(headingErrorDeg);
+                aimPower = Math.min(aimPower, AIM_MAX_POWER);
+                aimPower = Math.max(aimPower, AIM_MIN_POWER);
+                rotate = -Math.copySign(aimPower, headingErrorDeg);
+            }
         }
 
 
-        // =========================================================
-        // 底盘控制
-        // =========================================================
-
-        double forward =
-                -gamepad1.left_stick_y;
-
-        double strafe =
-                gamepad1.left_stick_x;
-
-        double rotate =
-                gamepad1.right_stick_x;
-
-
-        // Back：
-        // Field Centric / Robot Centric 切换
-
-        if (
-                gamepad1.back
-                        && !lastFieldCentricButton
-        ) {
-
-            fieldCentric =
-                    !fieldCentric;
-        }
-
-
-        lastFieldCentricButton =
-                gamepad1.back;
-
-
+        // =====================================================
+        // Drive
+        // =====================================================
         if (fieldCentric) {
-
-            drive.driveFieldCentric(
-                    forward,
-                    strafe,
-                    rotate,
-                    robot.getHeading()
-            );
-
-        } else {
-
-            drive.driveRobotCentric(
-                    forward,
-                    strafe,
-                    rotate
-            );
-        }
-
-
-        // =========================================================
-        // Shooter RPM
-        // =========================================================
-
-        double currentRPM =
-                robot.getShooterRPM();
-
-
-        double error =
-                TARGET_RPM
-                        - currentRPM;
-
-
-        // =========================================================
-        // PID 时间
-        // =========================================================
-
-        long currentTime =
-                System.nanoTime();
-
-
-        double dt =
-                (currentTime - lastTime)
-                        / 1_000_000_000.0;
-
-
-        lastTime =
-                currentTime;
-
-
-        // 防止 dt 异常
-
-        if (
-                dt <= 0
-                        || dt > 0.2
-        ) {
-
-            dt =
-                    0.02;
-        }
-
-
-        // =========================================================
-        // Integral
-        // =========================================================
-
-        integral +=
-                error * dt;
-
-
-        /*
-         * Anti-Windup
-         */
-
-        if (
-                kI != 0.0
-        ) {
-
-            double maxIntegral =
-                    MAX_INTEGRAL_OUTPUT
-                            / Math.abs(
-                            kI
-                    );
-
-
-            integral =
-                    Math.max(
-                            -maxIntegral,
-                            Math.min(
-                                    maxIntegral,
-                                    integral
-                            )
-                    );
-
-        } else {
-
-            integral =
-                    0.0;
-        }
-
-
-        // =========================================================
-        // Derivative
-        // =========================================================
-
-        double derivative =
-                (error - lastError)
-                        / dt;
-
-
-        lastError =
-                error;
-
-
-        // =========================================================
-        // PIDF 各项输出
-        // =========================================================
-
-        double fOutput =
-                kF
-                        * TARGET_RPM;
-
-
-        double pOutput =
-                kP
-                        * error;
-
-
-        double iOutput =
-                kI
-                        * integral;
-
-
-        double dOutput =
-                kD
-                        * derivative;
-
-
-        // =========================================================
-        // PID Raw Power
-        // =========================================================
-
-        double rawShooterPower =
-                fOutput
-                        + pOutput
-                        + iOutput
-                        + dOutput;
-
-
-        // =========================================================
-        // 当前电池电压
-        // =========================================================
-
-        double batteryVoltage =
-                voltageSensor.getVoltage();
-
-
-        /*
-         * 如果出现异常读数，
-         * 不进行额外补偿。
-         */
-
-        if (
-                batteryVoltage < 1.0
-        ) {
-
-            batteryVoltage =
-                    NOMINAL_VOLTAGE;
-        }
-
-
-        // =========================================================
-        // 电压补偿
-        // =========================================================
-
-        double voltageCompensation =
-                NOMINAL_VOLTAGE
-                        / batteryVoltage;
-
-
-        // =========================================================
-        // Final Shooter Power
-        // =========================================================
-
-        double shooterPower =
-                rawShooterPower
-                        * voltageCompensation;
-
-
-        // Motor Power 限制 0 ~ 1
-
-        shooterPower =
-                Math.max(
-                        0.0,
-                        Math.min(
-                                1.0,
-                                shooterPower
-                        )
-                );
-
-
-        // =========================================================
-        // Shooter 始终运行
-        // =========================================================
-
-        robot.shooter1.setPower(
-                shooterPower
-        );
-
-
-        robot.shooter2.setPower(
-                shooterPower
-        );
-
-
-        // =========================================================
-        // Shooter Ready
-        // =========================================================
-
-        boolean shooterReady =
-                Math.abs(
-                        error
-                )
-                        <= RPM_TOLERANCE;
-
-
-        // =========================================================
-        // Intake / Feed / Block
-        // =========================================================
-
-
-        // ---------------------------------------------------------
-        // 左 Bumper：吐球
-        // ---------------------------------------------------------
-
-        if (
-                gamepad1.left_bumper
-        ) {
-
-            robot.intake.setPower(
-                    -1.0
-            );
-
-
-            robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
-            );
-
-
-            feedUnlocked =
-                    false;
-
-
-            // ---------------------------------------------------------
-            // 右 Trigger：发射
-            // ---------------------------------------------------------
-
-        } else if (
-                gamepad1.right_trigger
-                        > 0.1
-        ) {
-
-
-            /*
-             * 第一球：
-             *
-             * 等待 RPM 达到目标 ± tolerance
-             */
-
-            if (
-                    !feedUnlocked
-                            && shooterReady
-            ) {
-
-                feedUnlocked =
-                        true;
-            }
-
-
-            /*
-             * 一旦第一次 Ready：
-             *
-             * 持续 Feed。
-             *
-             * 后续即使 RPM 因为射球下降，
-             * 也不会停止。
-             */
-
-            if (
-                    feedUnlocked
-            ) {
-
-                robot.block.setPosition(
-                        RobotHardware.BLOCK_OPEN
-                );
-
-
-                // 使用前面统一定义的 FEED_POWER
-                robot.intake.setPower(
-                        FEED_POWER
-                );
-
+            double fieldForward;
+            double fieldStrafe;
+
+            if (RED_ALLIANCE) {
+                fieldStrafe = stickForward;
+                fieldForward = -stickRight;
             } else {
-
-                robot.block.setPosition(
-                        RobotHardware.BLOCK_CLOSE
-                );
-
-
-                robot.intake.setPower(
-                        0.0
-                );
+                fieldStrafe = -stickForward;
+                fieldForward = stickRight;
             }
 
-
-            // ---------------------------------------------------------
-            // 左 Trigger：吸球
-            // ---------------------------------------------------------
-
-        } else if (
-                gamepad1.left_trigger
-                        > 0.1
-        ) {
-
-
-            // 下一次发射重新等待 RPM
-
-            feedUnlocked =
-                    false;
-
-
-            robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
-            );
-
-
-            // 满球以后禁止继续吸球
-
-            if (
-                    ballsFull
-            ) {
-
-                robot.intake.setPower(
-                        1.0
-                );
-
-            } else {
-
-                // 正常吸球保持全速
-                robot.intake.setPower(
-                        1.0
-                );
-            }
-
-
-            // ---------------------------------------------------------
-            // 无操作
-            // ---------------------------------------------------------
-
+            double driveHeadingRad = robotHeadingRad - Math.PI / 2.0;
+            drive.driveFieldCentric(fieldForward, fieldStrafe, rotate, driveHeadingRad);
         } else {
-
-            feedUnlocked =
-                    false;
-
-
-            robot.intake.setPower(
-                    0.0
-            );
-
-
-            robot.block.setPosition(
-                    RobotHardware.BLOCK_CLOSE
-            );
+            drive.driveRobotCentric(stickForward, stickRight, rotate);
         }
-
-
-        // =========================================================
-        // Driver Station Telemetry
-        // =========================================================
-
-        telemetry.addData(
-                "驱动模式",
-                fieldCentric
-                        ? "场地中心"
-                        : "机器人中心"
-        );
-
-
-        telemetry.addData(
-                "朝向",
-                "%.1f°",
-                Math.toDegrees(
-                        robot.getHeading()
-                )
-        );
-
-
-        telemetry.addData(
-                "",
-                ""
-        );
 
 
         // =====================================================
         // Shooter
         // =====================================================
+        shooter.update();
+        double currentRPM = shooter.getCurrentRPM();
+        double rpmError = shooter.getError();
+        double shooterPower = shooter.getCurrentPower();
+        boolean shooterReady = shooter.isReady();
+
+        // =====================================================
+        // Intake / Feed / Block
+        // =====================================================
+        if (gamepad1.left_bumper) {
+            intake.outtake();
+            shooter.closeBlock();
+            feedUnlocked = false;
+        } else if (fireRequested) {
+            if (!feedUnlocked && modelValid && headingReady && shooterReady) {
+                feedUnlocked = true;
+            }
+
+            if (feedUnlocked) {
+                shooter.openBlock();
+                intake.setIntakePower(RobotConstants.FEED_POWER);
+            } else {
+                shooter.closeBlock();
+                intake.stop();
+            }
+        } else if (gamepad1.left_trigger > 0.1) {
+            feedUnlocked = false;
+            shooter.closeBlock();
+            intake.intake();
+        } else {
+            feedUnlocked = false;
+            intake.stop();
+            shooter.closeBlock();
+        }
+
+        // =====================================================
+        // Flower
+        // =====================================================
+        if (gamepad1.dpad_up) {
+            flower.up();
+        } else if (gamepad1.dpad_down) {
+            flower.down();
+        }
+
+
+        // =====================================================
+        // Telemetry
+        // =====================================================
+
+        double geometricHeadingForDisplay =
+                normalize360(
+                        Math.toDegrees(
+                                Math.atan2(
+                                        targetHiveY
+                                                - robotY,
+                                        targetHiveX
+                                                - robotX
+                                )
+                        )
+                );
+
+        double headingCorrectionForDisplay =
+                normalize180(
+                        recommendedHeadingDeg
+                                - geometricHeadingForDisplay
+                );
+
+        boolean fireReady =
+                modelValid
+                        && headingReady
+                        && shooterReady;
+
+
+        telemetry.addLine(
+                "========== UPSIDEDOWN AUTO AIM =========="
+        );
+
+        telemetry.addData(
+                "Alliance",
+                RED_ALLIANCE
+                        ? "RED"
+                        : "BLUE"
+        );
+
+        telemetry.addData(
+                "Drive Mode",
+                fieldCentric
+                        ? "FIELD"
+                        : "ROBOT"
+        );
+
+        telemetry.addData(
+                "Driver Forward",
+                RED_ALLIANCE
+                        ? "+X / 0°"
+                        : "-X / 180°"
+        );
+
+
+        telemetry.addLine("");
+
+        telemetry.addData(
+                "Target Hive",
+                targetHive.name
+        );
+
+        telemetry.addData(
+                "Target X",
+                "%.2f",
+                targetHiveX
+        );
+
+        telemetry.addData(
+                "Target Y",
+                "%.2f",
+                targetHiveY
+        );
+
+        telemetry.addData(
+                "Target Open",
+                "%.0f°",
+                targetOpenHeadingDeg
+        );
+
+
+        telemetry.addLine("");
+
+        telemetry.addData(
+                "Robot X",
+                "%.2f",
+                robotX
+        );
+
+        telemetry.addData(
+                "Robot Y",
+                "%.2f",
+                robotY
+        );
+
+        telemetry.addData(
+                "Distance",
+                "%.2f in",
+                distanceToHive
+        );
+
+        telemetry.addData(
+                "Distance Valid",
+                distanceValid
+                        ? "✓ YES"
+                        : "× NO"
+        );
+
+        telemetry.addData(
+                "Sector Error",
+                "%+.1f°",
+                sectorError
+        );
+
+        telemetry.addData(
+                "Sector Valid",
+                sectorValid
+                        ? "✓ YES"
+                        : "× NO"
+        );
+
+        telemetry.addData(
+                "Model Valid",
+                modelValid
+                        ? "✓ YES"
+                        : "× OUTSIDE"
+        );
+
+
+        telemetry.addLine("");
+
+        telemetry.addData(
+                "Heading",
+                "%.1f°",
+                robotHeadingDeg
+        );
+
+        telemetry.addData(
+                "Recommended Heading",
+                "%.1f°",
+                recommendedHeadingDeg
+        );
+
+        telemetry.addData(
+                "Heading Correction",
+                "%+.1f°",
+                headingCorrectionForDisplay
+        );
+
+        telemetry.addData(
+                "Heading Error",
+                "%+.1f°",
+                headingErrorDeg
+        );
+
+        telemetry.addData(
+                "Heading Ready",
+                headingReady
+                        ? "✓"
+                        : "×"
+        );
+
+
+        telemetry.addLine("");
+
+        telemetry.addData(
+                "Sector Base RPM",
+                "%.0f",
+                sectorBaseRPM
+        );
+
+        telemetry.addData(
+                "Distance RPM Correction",
+                "%+.0f",
+                distanceRPMCorrection
+        );
+
+        telemetry.addData(
+                "Recommended RPM",
+                "%.0f",
+                recommendedRPM
+        );
 
         telemetry.addData(
                 "Target RPM",
                 "%.0f",
-                TARGET_RPM
+                shooter.getTargetRPM()
         );
-
 
         telemetry.addData(
                 "Actual RPM",
@@ -717,13 +612,17 @@ public class UpsideDownTeleOpMain extends OpMode {
                 currentRPM
         );
 
-
         telemetry.addData(
                 "RPM Error",
                 "%.0f",
-                error
+                rpmError
         );
 
+        telemetry.addData(
+                "RPM Tolerance",
+                "%.0f",
+                shooter.getRpmTolerance()
+        );
 
         telemetry.addData(
                 "RPM Ready",
@@ -732,6 +631,12 @@ public class UpsideDownTeleOpMain extends OpMode {
                         : "×"
         );
 
+        telemetry.addData(
+                "Fire Ready",
+                fireReady
+                        ? "✓ READY"
+                        : "× WAIT"
+        );
 
         telemetry.addData(
                 "Feed Unlocked",
@@ -740,279 +645,257 @@ public class UpsideDownTeleOpMain extends OpMode {
                         : "NO"
         );
 
-
         telemetry.addData(
                 "Feed Power",
                 "%.2f",
-                FEED_POWER
+                RobotConstants.FEED_POWER
         );
 
+
+        telemetry.addLine("");
 
         telemetry.addData(
-                "",
-                ""
+                "disF",
+                ballAtF
+                        ? "BALL"
+                        : "EMPTY"
         );
-
-
-        // =====================================================
-        // Power / Voltage
-        // =====================================================
 
         telemetry.addData(
-                "Raw Power",
-                "%.4f",
-                rawShooterPower
+                "disM",
+                ballAtM
+                        ? "BALL"
+                        : "EMPTY"
         );
 
+        telemetry.addData(
+                "disB",
+                ballAtB
+                        ? "BALL"
+                        : "EMPTY"
+        );
+
+        telemetry.addData(
+                "Balls Full",
+                ballsFull
+                        ? "YES"
+                        : "NO"
+        );
+
+        telemetry.addData(
+                "Flower Position",
+                "%.2f",
+                flower.getPosition()
+        );
+
+
+        telemetry.addLine("");
+
+        telemetry.addData(
+                "Auto Aim",
+                autoAimRequested
+                        ? "ON"
+                        : "OFF"
+        );
 
         telemetry.addData(
                 "Shooter Power",
-                "%.4f",
+                "%.3f",
                 shooterPower
         );
 
-
         telemetry.addData(
-                "Battery Voltage",
+                "Battery",
                 "%.2f V",
-                batteryVoltage
+                shooter.getBatteryVoltage()
         );
 
 
-        telemetry.addData(
-                "Nominal Voltage",
-                "%.2f V",
-                NOMINAL_VOLTAGE
+        telemetry.addLine("");
+
+        telemetry.addLine(
+                "RB = Auto Aim Only"
         );
 
-
-        telemetry.addData(
-                "Voltage Comp",
-                "%.4f",
-                voltageCompensation
+        telemetry.addLine(
+                "RT = Auto Aim + Fire"
         );
 
-
-        telemetry.addData(
-                "",
-                ""
+        telemetry.addLine(
+                "LT = Intake"
         );
 
-
-        // =====================================================
-        // PID 参数
-        // =====================================================
-
-        telemetry.addData(
-                "kF",
-                "%.8f",
-                kF
+        telemetry.addLine(
+                "LB = Reverse"
         );
 
-
-        telemetry.addData(
-                "kP",
-                "%.8f",
-                kP
+        telemetry.addLine(
+                "D-pad UP/DOWN = Flower"
         );
 
-
-        telemetry.addData(
-                "kI",
-                "%.8f",
-                kI
+        telemetry.addLine(
+                "Back = Field / Robot Centric"
         );
 
-
-        telemetry.addData(
-                "kD",
-                "%.8f",
-                kD
+        telemetry.addLine(
+                "Model outside = RT will NOT feed"
         );
-
-
-        telemetry.addData(
-                "",
-                ""
-        );
-
-
-        // =====================================================
-        // PID Output
-        // =====================================================
-
-        telemetry.addData(
-                "F Output",
-                "%.4f",
-                fOutput
-        );
-
-
-        telemetry.addData(
-                "P Output",
-                "%.4f",
-                pOutput
-        );
-
-
-        telemetry.addData(
-                "I Output",
-                "%.4f",
-                iOutput
-        );
-
-
-        telemetry.addData(
-                "D Output",
-                "%.4f",
-                dOutput
-        );
-
-
-        telemetry.addData(
-                "",
-                ""
-        );
-
-
-        // =====================================================
-        // 球状态
-        // =====================================================
-
-        telemetry.addData(
-                "传感器 F",
-                ballAtF
-                        ? "✓ 有球"
-                        : "无球"
-        );
-
-
-        telemetry.addData(
-                "传感器 M",
-                ballAtM
-                        ? "✓ 有球"
-                        : "无球"
-        );
-
-
-        telemetry.addData(
-                "传感器 B",
-                ballAtB
-                        ? "✓ 有球"
-                        : "无球"
-        );
-
-
-        telemetry.addData(
-                "球满状态",
-                ballsFull
-                        ? "✓ 满"
-                        : "未满"
-        );
-
 
         telemetry.update();
 
 
-        // =========================================================
+        // =====================================================
         // FTC Dashboard
-        // =========================================================
+        // =====================================================
 
         TelemetryPacket packet =
                 new TelemetryPacket();
 
+        packet.put(
+                "AllianceRed",
+                RED_ALLIANCE
+                        ? 1
+                        : 0
+        );
 
-        // =====================================================
-        // RPM
-        // =====================================================
+        packet.put(
+                "TargetHive",
+                targetHive.name
+        );
+
+        packet.put(
+                "TargetHiveX",
+                targetHiveX
+        );
+
+        packet.put(
+                "TargetHiveY",
+                targetHiveY
+        );
+
+        packet.put(
+                "TargetOpenHeading",
+                targetOpenHeadingDeg
+        );
+
+        packet.put(
+                "RobotX",
+                robotX
+        );
+
+        packet.put(
+                "RobotY",
+                robotY
+        );
+
+        packet.put(
+                "DistanceToHive",
+                distanceToHive
+        );
+
+        packet.put(
+                "DistanceValid",
+                distanceValid
+                        ? 1
+                        : 0
+        );
+
+        packet.put(
+                "SectorError",
+                sectorError
+        );
+
+        packet.put(
+                "SectorValid",
+                sectorValid
+                        ? 1
+                        : 0
+        );
+
+        packet.put(
+                "ModelValid",
+                modelValid
+                        ? 1
+                        : 0
+        );
+
+        packet.put(
+                "RobotHeading",
+                robotHeadingDeg
+        );
+
+        packet.put(
+                "RecommendedHeading",
+                recommendedHeadingDeg
+        );
+
+        packet.put(
+                "HeadingCorrection",
+                headingCorrectionForDisplay
+        );
+
+        packet.put(
+                "HeadingError",
+                headingErrorDeg
+        );
+
+        packet.put(
+                "HeadingReady",
+                headingReady
+                        ? 1
+                        : 0
+        );
+
+        packet.put(
+                "SectorBaseRPM",
+                sectorBaseRPM
+        );
+
+        packet.put(
+                "DistanceRPMCorrection",
+                distanceRPMCorrection
+        );
+
+        packet.put(
+                "RecommendedRPM",
+                recommendedRPM
+        );
 
         packet.put(
                 "TargetRPM",
-                TARGET_RPM
+                shooter.getTargetRPM()
         );
-
 
         packet.put(
                 "ActualRPM",
                 currentRPM
         );
 
-
         packet.put(
-                "Error",
-                error
+                "RPMError",
+                rpmError
         );
 
-
-        // =====================================================
-        // Power
-        // =====================================================
-
         packet.put(
-                "RawPower",
-                rawShooterPower
+                "RPMReady",
+                shooterReady
+                        ? 1
+                        : 0
         );
 
-
         packet.put(
-                "Power",
-                shooterPower
+                "FireReady",
+                fireReady
+                        ? 1
+                        : 0
         );
 
-
-        // =====================================================
-        // Voltage
-        // =====================================================
-
         packet.put(
-                "BatteryVoltage",
-                batteryVoltage
+                "AutoAim",
+                autoAimRequested
+                        ? 1
+                        : 0
         );
-
-
-        packet.put(
-                "NominalVoltage",
-                NOMINAL_VOLTAGE
-        );
-
-
-        packet.put(
-                "VoltageComp",
-                voltageCompensation
-        );
-
-
-        // =====================================================
-        // PID Outputs
-        // =====================================================
-
-        packet.put(
-                "F_Output",
-                fOutput
-        );
-
-
-        packet.put(
-                "P_Output",
-                pOutput
-        );
-
-
-        packet.put(
-                "I_Output",
-                iOutput
-        );
-
-
-        packet.put(
-                "D_Output",
-                dOutput
-        );
-
-
-        // =====================================================
-        // Feed
-        // =====================================================
 
         packet.put(
                 "Feed",
@@ -1021,42 +904,59 @@ public class UpsideDownTeleOpMain extends OpMode {
                         : 0
         );
 
-
         packet.put(
                 "FeedPower",
-                FEED_POWER
+                RobotConstants.FEED_POWER
         );
-
-
-        // =====================================================
-        // 当前 PID 参数
-        // =====================================================
 
         packet.put(
-                "Current_kF",
-                kF
+                "BallAtF",
+                ballAtF
+                        ? 1
+                        : 0
         );
-
 
         packet.put(
-                "Current_kP",
-                kP
+                "BallAtM",
+                ballAtM
+                        ? 1
+                        : 0
         );
-
 
         packet.put(
-                "Current_kI",
-                kI
+                "BallAtB",
+                ballAtB
+                        ? 1
+                        : 0
         );
-
 
         packet.put(
-                "Current_kD",
-                kD
+                "BallsFull",
+                ballsFull
+                        ? 1
+                        : 0
         );
 
+        packet.put(
+                "FlowerPosition",
+                flower.getPosition()
+        );
 
-        // 发送 Dashboard
+        packet.put(
+                "ShooterPower",
+                shooterPower
+        );
+
+        packet.put(
+                "BatteryVoltage",
+                shooter.getBatteryVoltage()
+        );
+
+        packet.put(
+                "AimRotatePower",
+                rotate
+        );
+
 
         FtcDashboard
                 .getInstance()
@@ -1067,62 +967,158 @@ public class UpsideDownTeleOpMain extends OpMode {
 
 
     // =========================================================
-    // Reset PID
+    // HIVE Target 数据结构
     // =========================================================
 
-    private void resetPID() {
+    private static class HiveTarget {
 
-        integral =
-                0.0;
+        final String name;
+        final double x;
+        final double y;
+        final double openHeadingDeg;
+
+        final double distance;
+        final double sectorError;
+
+        final boolean modelValid;
 
 
-        lastError =
-                0.0;
+        HiveTarget(
+                String name,
+                double x,
+                double y,
+                double openHeadingDeg,
+                double distance,
+                double sectorError,
+                boolean modelValid
+        ) {
 
+            this.name =
+                    name;
 
-        lastTime =
-                System.nanoTime();
+            this.x =
+                    x;
+
+            this.y =
+                    y;
+
+            this.openHeadingDeg =
+                    openHeadingDeg;
+
+            this.distance =
+                    distance;
+
+            this.sectorError =
+                    sectorError;
+
+            this.modelValid =
+                    modelValid;
+        }
     }
 
 
     // =========================================================
-    // Stop
+    // Evaluate HIVE
+    // =========================================================
+
+    private HiveTarget evaluateHive(String name, double hiveX, double hiveY, double openHeadingDeg, double robotX, double robotY) {
+        double hiveToRobotX = robotX - hiveX;
+        double hiveToRobotY = robotY - hiveY;
+        double distance = Math.hypot(hiveToRobotX, hiveToRobotY);
+        double angleFromHive = normalize360(Math.toDegrees(Math.atan2(hiveToRobotY, hiveToRobotX)));
+        double sectorError = normalize180(angleFromHive - openHeadingDeg);
+        boolean modelValid = distance >= MODEL_MIN_DISTANCE && distance <= MODEL_MAX_DISTANCE && sectorError >= MODEL_MIN_SECTOR && sectorError <= MODEL_MAX_SECTOR;
+
+        return new HiveTarget(name, hiveX, hiveY, openHeadingDeg, distance, sectorError, modelValid);
+    }
+
+
+    // =========================================================
+    // 自动选择目标 HIVE
+    // =========================================================
+
+    private HiveTarget selectBestHive(HiveTarget lowerHive, HiveTarget upperHive) {
+        if (lowerHive.modelValid && upperHive.modelValid) {
+            return lowerHive.distance <= upperHive.distance ? lowerHive : upperHive;
+        }
+
+        if (lowerHive.modelValid) { return lowerHive; }
+        if (upperHive.modelValid) { return upperHive; }
+
+        return lowerHive.distance <= upperHive.distance ? lowerHive : upperHive;
+    }
+
+
+    // =========================================================
+    // 推荐 Heading
+    // =========================================================
+
+    private double getRecommendedHeadingDeg(double robotX, double robotY, double hiveX, double hiveY, double sectorError) {
+        double geometricHeading = Math.toDegrees(Math.atan2(hiveY - robotY, hiveX - robotX));
+        double headingCorrection = 0.0;
+
+        if (sectorError < -40.0) {
+            double t = (-sectorError - 40.0) / 10.0;
+            t = Math.max(0.0, Math.min(1.0, t));
+            headingCorrection = 4.0 * t;
+        }
+
+        return normalize360(geometricHeading + headingCorrection);
+    }
+
+
+    // =========================================================
+    // Sector 基础 RPM
+    // =========================================================
+
+    private double getSectorBaseRPM(double sectorError) {
+        if (sectorError <= -25.0) { return 3800.0; }
+        else if (sectorError <= -15.0) { return 3775.0; }
+        else if (sectorError <= 10.0) { return 3750.0; }
+        else if (sectorError <= 20.0) { return 3725.0; }
+        else if (sectorError <= 30.0) { return 3700.0; }
+        else { return 3675.0; }
+    }
+
+    private double getDistanceRPMCorrection(double distanceToHive) {
+        return (distanceToHive - RPM_DISTANCE_BASE) * RPM_PER_INCH;
+    }
+
+    private double getRecommendedRPM(double distanceToHive, double sectorError) {
+        double rpm = getSectorBaseRPM(sectorError) + getDistanceRPMCorrection(distanceToHive);
+        return Math.round(rpm / 25.0) * 25.0;
+    }
+
+
+    // =========================================================
+    // Angle Helpers
+    // =========================================================
+
+    private double normalize360(double angle) {
+        angle %= 360.0;
+        if (angle < 0.0) { angle += 360.0; }
+        return angle;
+    }
+
+    private double normalize180(double angle) {
+        angle %= 360.0;
+        if (angle > 180.0) { angle -= 360.0; }
+        if (angle < -180.0) { angle += 360.0; }
+        return angle;
+    }
+
+
+    // =========================================================
+    // STOP
     // =========================================================
 
     @Override
     public void stop() {
-
-        robot.intake.setPower(
-                0.0
-        );
-
-
-        robot.shooter1.setPower(
-                0.0
-        );
-
-
-        robot.shooter2.setPower(
-                0.0
-        );
-
-
-        robot.block.setPosition(
-                RobotHardware.BLOCK_CLOSE
-        );
-
-
-        robot.ledL.setPosition(
-                0.0
-        );
-
-
-        robot.ledR.setPosition(
-                0.0
-        );
-
-
-        feedUnlocked =
-                false;
+        drive.stop();
+        intake.stop();
+        shooter.stop();
+        shooter.closeBlock();
+        led.off();
+        feedUnlocked = false;
     }
 }

@@ -4,6 +4,7 @@ import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.math.Pose;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
@@ -11,7 +12,11 @@ import com.qualcomm.robotcore.hardware.VoltageSensor;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 import org.firstinspires.ftc.teamcode.upsidedown.hardware.RobotHardware;
 import org.firstinspires.ftc.teamcode.upsidedown.subsystems.DriveSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.ShooterSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.FlowerSubsystem;
+import org.firstinspires.ftc.teamcode.upsidedown.subsystems.LEDSubsystem;
 
+@Disabled
 @TeleOp(name = "UpsideDown Auto Aim Test", group = "Test")
 public class UpsideDownAutoAimTest extends OpMode {
 
@@ -71,7 +76,7 @@ public class UpsideDownAutoAimTest extends OpMode {
 
         voltageSensor = hardwareMap.voltageSensor.iterator().next();
 
-        robot.block.setPosition(RobotHardware.BLOCK_CLOSE);
+        robot.block.setPosition(org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE);
         robot.ledL.setPosition(0.48);
         robot.ledR.setPosition(0.48);
 
@@ -260,7 +265,7 @@ public class UpsideDownAutoAimTest extends OpMode {
         if (gamepad1.left_bumper) {
             // 吐球
             robot.intake.setPower(-1.0);
-            robot.block.setPosition(RobotHardware.BLOCK_CLOSE);
+            robot.block.setPosition(org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE);
             feedUnlocked = false;
 
         } else if (fireRequested) {
@@ -271,23 +276,23 @@ public class UpsideDownAutoAimTest extends OpMode {
 
             // 一旦解锁，本次 RT 持续按住期间持续 Feed
             if (feedUnlocked) {
-                robot.block.setPosition(RobotHardware.BLOCK_OPEN);
+                robot.block.setPosition(org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_OPEN);
                 robot.intake.setPower(FEED_POWER);
             } else {
-                robot.block.setPosition(RobotHardware.BLOCK_CLOSE);
+                robot.block.setPosition(org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE);
                 robot.intake.setPower(0.0);
             }
 
         } else if (gamepad1.left_trigger > 0.1) {
             // 吸球
             feedUnlocked = false;
-            robot.block.setPosition(RobotHardware.BLOCK_CLOSE);
+            robot.block.setPosition(org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE);
             robot.intake.setPower(1.0);
 
         } else {
             feedUnlocked = false;
             robot.intake.setPower(0.0);
-            robot.block.setPosition(RobotHardware.BLOCK_CLOSE);
+            robot.block.setPosition(org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE);
         }
 
         // Driver Station Telemetry
@@ -405,7 +410,7 @@ public class UpsideDownAutoAimTest extends OpMode {
         robot.shooter1.setPower(0.0);
         robot.shooter2.setPower(0.0);
 
-        robot.block.setPosition(RobotHardware.BLOCK_CLOSE);
+        robot.block.setPosition(org.firstinspires.ftc.teamcode.upsidedown.RobotConstants.BLOCK_CLOSE);
 
         robot.ledL.setPosition(0.0);
         robot.ledR.setPosition(0.0);

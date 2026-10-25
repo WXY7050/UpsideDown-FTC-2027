@@ -106,17 +106,17 @@ public class Constants {
                 //              ↓
                 //             -X
                 //
+                // Forward Pod 在机器人左侧：
+                // X = +2.835"
                 //
                 // Strafe Pod 在机器人后方：
-                // X = -5.354"
+                // Y = -5.354"
                 //
-                // Forward Pod 在机器人左侧：
-                // Y = +2.835"
                 // ------------------------------------------------
 
-                c.xPodOffset.set(-5.354);
+                c.xPodOffset.set(2.835);
 
-                c.yPodOffset.set(2.835);
+                c.yPodOffset.set(-5.354);
 
 
                 // ------------------------------------------------
@@ -294,6 +294,36 @@ public class Constants {
 
                 c.naturalStrafeDeceleration.set(
                         47.74610628733895
+                );
+
+
+                // =================================================
+                // End Constraints
+                //
+                // 默认终点条件很严：
+                // translation ≈ 0.1"
+                // heading ≈ 0.4°
+                // velocity ≈ 0.1 in/s
+                //
+                // 这里稍微放宽，减少到点后持续来回纠正、抖动。
+                // =================================================
+
+                c.translationalConstraint.set(
+                        0.50
+                );
+
+                c.headingConstraint.set(
+                        Math.toRadians(1.5)
+                );
+
+                c.velocityConstraint.set(
+                        1.0
+                );
+
+                // 单位：ms
+                // 到 parametric end 后最多再纠正 150ms。
+                c.timeoutConstraint.set(
+                        150.0
                 );
             });
 
